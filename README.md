@@ -1,0 +1,1 @@
+# Click [here](https://discord.com/api/oauth2/authorize?client_id=828998753091584010&permissions=8&scope=bot) to add the bot to your discord server
