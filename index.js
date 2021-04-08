@@ -1,5 +1,5 @@
 const Discord = require("discord.js");
-const client = new Discord.Client();
+const client = new Discord.Client({ ws: { intents: new Discord.Intents(Discord.Intents.ALL) }});
 const mongoose = require("mongoose");
 
 mongoose.connect("mongodb://localhost:27017/gametimedb", {useNewUrlParser: true, useUnifiedTopology: true});
@@ -30,9 +30,16 @@ const CurrentGameSchema = new mongoose.Schema({
 
 const CurrentGame = mongoose.model("CurrentGame", CurrentGameSchema);
 
-const helpMessage = "the available commands are $rolldice, $rolldice2, $getrandom, $randomorder, $newgame, $currentgamescores, $cancelgame, $endgame, $leaderboard, $addscores. Type $help followed by the command without the $ to get to know more.";
+const ServerSchema = new mongoose.Schema({
+    serverId: String
+});
+
+const Server = mongoose.model("Server", ServerSchema);
+
+const helpMessage = "the available commands are $hello, $rolldice, $rolldice2, $getrandom, $randomorder, $newgame, $currentgamescores, $cancelgame, $endgame, $leaderboard, $addscores and $randomassign. Type $help followed by the command without the $ to get to know more.";
 
 const helpObject = {
+    "hello": "$hello just greets you back.",
     "rolldice": "$rolldice returns a random number between 1 and 6 (inclusive)",
     "rolldice2": "$rolldice2 returns two random numbers between 1 and 6 (inclusive)",
     "getrandom": "$getrandom takes in 2 values. Ex: $getrandom 1 10. This returns a random number between 1 and 10 (inclusive)",
@@ -42,7 +49,8 @@ const helpObject = {
     "cancelgame": "$cancelgame ends the game and deletes the current game's scoreboard",
     "endgame": "$endgame ends the game and adds the scores of the current game to the overall leaderboard",
     "leaderboard": "$leaderboard displays the overall leaderboard of the server",
-    "addscores": "$addscores takes in pair of values. Ex: $addscores @mention1 5 @mention2 10. This adds 5 to the score of @mention1 and adds 10 to the score of @mention2 (if there is an active game)"
+    "addscores": "$addscores takes in pair of values. Ex: $addscores @mention1 5 @mention2 10. This adds 5 to the score of @mention1 and adds 10 to the score of @mention2 (if there is an active game)",
+    "randomassign": "$randomassign takes in pair of values. Ex: $randomassign role1 1 role2 5. This creates 6 roles and assigns to the players of the current game. Note: The number of players should match the number of roles and there should be an active game. Also, 'role' here isn't the same as Discord roles. All the players must also allow private DMs from this server. This can be enabled in the server's private settings."
 };
 
 require("dotenv").config();
@@ -142,14 +150,36 @@ async function saveCurrentGameScore(messageServerId){
     return true;
 }
 
+async function adjustingTasks(guild){
+    let players = [];
+    var members;
+    await guild.members.fetch().then(data => members=data);
+    members.forEach((ele)=>{if (!ele.user.bot) players.push(ele)});
+    const scoresArray = await createOrAdjustLeaderBoard(guild.id, players);
+    await checkOrCreateAndAssignRoles(guild, scoresArray, players);
+}
+
+
+async function initiateIfNot(guild){
+    var messageServerId = guild.id;
+    const foundServer = await Server.findOne({serverId: messageServerId});
+    if (foundServer===null || foundServer===undefined){
+        const newServer = new Server({
+            serverId: messageServerId
+        });
+        await newServer.save();
+        await adjustingTasks(guild);
+    }
+}
+
 async function createOrAdjustLeaderBoard(messageServerId, players){
     const lb = await ScoreBoard.findOne({serverId: messageServerId});
     var scoresArray;
     if (lb===null){
         scoresArray = [];
         for (var i=0; i<players.length; i++){
-            var id = players[i];
-            var name = await getName(id);
+            var id = players[i].user.id;
+            var name = players[i].user.username;
             scoresArray.push({
                 playerId: id, 
                 playerName: name, 
@@ -162,30 +192,106 @@ async function createOrAdjustLeaderBoard(messageServerId, players){
         });
         await sb.save();
     } else{
-        var flag;
         const existingPlayers = lb.scores;
-        scoresArray = lb.scores;
+        scoresArray = [];
+        var score;
         for (var i=0; i<players.length; i++){
-            var id = players[i];
-            flag=false;
+            var id = players[i].user.id;
+            var name = players[i].user.username;
+            score=0;
             for (var j=0; j<existingPlayers.length; j++){
                 if (existingPlayers[j].playerId===id){
-                    flag=true;
+                    score=existingPlayers[j].playerScore;
                     break;
                 }
             }
-            if (!flag){
-                var name = await getName(id);
-                scoresArray.push({
-                    playerId: id, 
-                    playerName: name, 
-                    playerScore: 0
-                });
-            }
+            scoresArray.push({
+                playerId: id, 
+                playerName: name, 
+                playerScore: score
+            });
         }
         await ScoreBoard.updateOne({serverId: messageServerId}, {scores: scoresArray})
     }
-    
+    return scoresArray;
+}
+
+const roles = ["Gold", "Silver", "Bronze"];
+const colors = ["#d4af37", "#544f4f", "#cd7f32"];
+async function checkOrCreateAndAssignRoles(guild, scoresArray, players){
+    var rolesArray = [];
+    for (var i=0; i<3; i++){
+        var role = await guild.roles.cache.find(role=>role.name==roles[i]);
+        if (role!==undefined && role!==null){
+            //roles exist
+        } else {
+            await guild.roles.create({
+                data: {
+                    name: roles[i],
+                    color: colors[i]
+                },
+                reason: "Role for leaderboard"
+            });
+            console.log("Created new role "+roles[i]);
+            role = await guild.roles.cache.find(role=>role.name==roles[i]);
+        }
+        rolesArray.push(role);
+    }
+
+    //Roles are present, now assign
+    scoresArray.sort((a, b)=>b.playerScore-a.playerScore);
+    var goldMembers = [];
+    var silverMembers = [];
+    var bronzeMembers = [];
+    var goldScore = 0, silverScore = 0, bronzeScore = 0;
+    scoresArray.forEach((player) => {
+        var scr = player.playerScore;
+        if (scr!=0){
+            if (goldScore==0){
+                goldScore = scr;
+            } else if (scr!=goldScore && silverScore==0){
+                silverScore = scr;
+            } else if (scr!=goldScore && scr!=silverScore && bronzeScore==0){
+                bronzeScore = scr;
+            }
+
+            if (goldScore!=0 && scr==goldScore){
+                goldMembers.push(player.playerId);
+            } else if (silverScore!=0 && scr==silverScore){
+                silverMembers.push(player.playerId);
+            } else if (bronzeScore!=0 && scr==bronzeScore){
+                bronzeMembers.push(player.playerId);
+            }
+        }
+    });
+
+
+    for (var i=0; i<players.length; i++){
+        for (var j=0; j<rolesArray.length; j++){
+            await players[i].roles.remove(rolesArray[j]);
+        }
+    }
+    for (var i=0; i<goldMembers.length; i++){
+        var id = goldMembers[i];
+        var member = players.find((player)=> player.user.id==id);
+        if (member==undefined || member==null)
+            continue;
+        await member.roles.add(rolesArray[0]);
+    }
+    for (var i=0; i<silverMembers.length; i++){
+        var id = silverMembers[i];
+        var member = players.find((player)=> player.user.id==id);
+        if (member==undefined || member==null)
+            continue;
+        await member.roles.add(rolesArray[1]);
+    }
+    for (var i=0; i<bronzeMembers.length; i++){
+        var id = bronzeMembers[i];
+        var member = players.find((player)=> player.user.id==id);
+        if (member==undefined || member==null)
+            continue;
+        await member.roles.add(rolesArray[2]);
+    }
 }
 
 async function resetLeaderBoard(messageServerId){
@@ -242,6 +348,46 @@ async function getLeaderBoard(messageServerId){
     return reply;
 }
 
+//note: the roles here means something else. Not the discord roles.
+async function assign(guild, roles){
+    var messageServerId = guild.id;
+    const currGame = await CurrentGame.findOne({serverId: messageServerId});
+    if (currGame===null || currGame===undefined){
+        return 3;
+    }
+    let fullRoles = [];
+    try{
+        for (var i=0; i<roles.length; i+=2){
+            var ct = Number(roles[i+1]);
+            while (ct--){
+                fullRoles.push(roles[i]);
+            }
+        }
+    }
+    catch{
+        return 4;
+    }
+    const scores = currGame.scores;
+    if (scores.length!== fullRoles.length){
+        return 2;
+    }
+    //dm after shuffling
+    var shuffledRoles = shuffle(fullRoles);
+    for (var i=0; i<scores.length; i++){
+        var playerId = scores[i].playerId;
+        var player = await guild.members.fetch(playerId);
+        try{
+            await player.send("You are assigned " + shuffledRoles[i]);
+        }
+        catch (exception){
+            console.log(exception);
+            return 5;
+        }
+        
+    }
+    return 1;
+}
+
 async function getCurrentScore(messageServerId){
     const sb = await CurrentGame.findOne({serverId: messageServerId});
     if (sb===null){
@@ -256,16 +402,23 @@ async function getCurrentScore(messageServerId){
     return reply;
 }
 
+client.on("guildMemberAdd", async (member)=>{
+    console.log("New member added");
+    await adjustingTasks(member.guild);
+})
+
+client.on("guildMemberRemove", async (member)=>{
+    console.log("Member removed");
+    await adjustingTasks(member.guild);
+})
+
 client.on("message", async message=>{
     if (message.author==client.user || !message.content.startsWith("$")){
         return;
     }
-    let messageServerId = message.guild.id;
     let messageContent = message.content;
-    let players = [];
-    const members = message.channel.guild.members.cache;
-    members.forEach((ele)=>{if (!ele.user.bot) players.push(ele.user.id)});
-    await createOrAdjustLeaderBoard(messageServerId, players);
+    let messageServerId = message.guild.id;
+    await initiateIfNot(message.guild);
     if (messageContent.startsWith("$help")){
         let params = messageContent.split(" ");
         if (params.length===1){
@@ -322,11 +475,13 @@ client.on("message", async message=>{
         const flag = await saveCurrentGameScore(messageServerId);
         let players = [], toSend = [];
         if (params[1]=="all"){
-            message.channel.guild.members.cache.forEach(element => {
-                if (!element.user.bot){
-                    players.push(element.user.id);
-                    toSend.push("<@"+element.user.id+">");
-                }
+            await message.channel.guild.members.fetch().then((members)=>{
+                members.forEach(element => {
+                    if (!element.user.bot && element.user.presence.status!=="offline"){
+                        players.push(element.user.id);
+                        toSend.push("<@"+element.user.id+">");
+                    }
+                });
             });
         }
         else
@@ -351,6 +506,7 @@ client.on("message", async message=>{
         else{
             message.reply("no active game at the moment.");
         }
+        await adjustingTasks(message.guild);
     }
     else if (messageContent.startsWith("$leaderboard")){
         var lb = await getLeaderBoard(messageServerId);
@@ -375,6 +531,7 @@ client.on("message", async message=>{
     else if (messageContent.startsWith("$resetleaderboard")){
         await resetLeaderBoard(messageServerId);
         message.reply("leaderboard reset.")
+        await adjustingTasks(message.guild);
     }
     else if (messageContent.startsWith("$addscores")){
         let params = messageContent.split(" ");
@@ -388,6 +545,28 @@ client.on("message", async message=>{
         } 
         else {
             message.reply("no active game at the moment");
+        }
+    }
+    else if (messageContent.startsWith("$hello")){
+        message.reply("hello! I am GameTime bot. Type $help to know more.");
+    }
+    else if (messageContent.startsWith("$randomassign")){
+        let params = messageContent.split(" ");
+        if (params.length===1){
+            message.reply("specify the list.");
+            return;
+        }
+        const flag = await assign(message.channel.guild, params.slice(1));
+        if (flag===1){
+            message.reply("assigned.");
+        } else if (flag===2){
+            message.reply("number of items in the list and number of players don't match.");
+        } else if (flag===3){
+            message.reply("no active game at the moment.");
+        } else if (flag==4){
+            message.reply("invalid list.");
+        } else {
+            message.reply("couldn't assign to one or more members due to their privacy settings. Kindly check if all players allow DMs from this server. Right click on the server icon and enable the option in privacy settings.");
         }
     }
 });
