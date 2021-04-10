@@ -2,6 +2,7 @@
 const Discord = require("discord.js");
 const client = new Discord.Client({ ws: { intents: new Discord.Intents(Discord.Intents.ALL) } });
 const mongoose = require("mongoose");
+const keepAlive = require("./server");
 require("dotenv").config();
 
 /* Connecting to database */
@@ -596,5 +597,8 @@ client.on("message", async message => {
     }
 });
 
-// starts the server
+// keeps the server running even if replit tab is closed
+keepAlive();
+
+// starts the discord bot server
 client.login(process.env.TOKEN);
