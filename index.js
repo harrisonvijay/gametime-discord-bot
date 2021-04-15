@@ -62,7 +62,7 @@ const helpObject = {
 
 const roles = ["Gold", "Silver", "Bronze"];
 
-const colors = ["#d4af37", "#544f4f", "#cd7f32"];
+const colors = ["#d4af37", "#9fa5ac", "#cd7f32"];
 
 /* Helper functions */
 
@@ -127,6 +127,9 @@ async function assign(guild, roles) {
     try {
         for (var i = 0; i < roles.length; i += 2) {
             var ct = Number(roles[i + 1]);
+            if (isNaN(ct)) {
+                return 4;
+            }
             while (ct--) {
                 fullRoles.push(roles[i]);
             }
@@ -212,7 +215,7 @@ function matchAndReturn(board1, board2) {
     for (var i = 0; i < board1Scores.length; i++) {
         flag = false;
         for (var j = 0; j < board2Scores.length; j++) {
-            if (board1Scores[i].playerName === board2Scores[j].playerName) {
+            if (board1Scores[i].playerId === board2Scores[j].playerId) {
                 flag = true;
                 score = board1Scores[i].playerScore + board2Scores[j].playerScore;
                 scoresArray.push({ playerId: board1Scores[i].playerId, playerName: board1Scores[i].playerName, playerScore: score });
