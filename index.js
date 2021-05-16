@@ -43,7 +43,7 @@ const Server = mongoose.model("Server", ServerSchema);
 
 /* Useful variables */
 
-const helpMessage = "the available commands are $hello, $rolldice, $rolldice2, $getrandom, $randomorder, $newgame, $currentgamescores, $cancelgame, $endgame, $leaderboard, $addscores and $randomassign. Type $help followed by the command without the $ to get to know more.";
+const helpMessage = "the available commands are $hello, $rolldice, $rolldice2, $getrandom, $randomorder, $newgame, $currentgamescores, $cancelgame, $endgame, $leaderboard, $resetleaderboard, $addscores and $randomassign. Type $help followed by the command without the $ to get to know more.";
 
 const helpObject = {
     "hello": "$hello just greets you back.",
@@ -56,6 +56,7 @@ const helpObject = {
     "cancelgame": "$cancelgame ends the game and deletes the current game's scoreboard",
     "endgame": "$endgame ends the game and adds the scores of the current game to the overall leaderboard",
     "leaderboard": "$leaderboard displays the overall leaderboard of the server",
+    "resetleaderboard": "$resetleaderboard resets the overall leaderboard",
     "addscores": "$addscores takes in pair of values. Ex: $addscores @mention1 5 @mention2 10. This adds 5 to the score of @mention1 and adds 10 to the score of @mention2 (if there is an active game)",
     "randomassign": "$randomassign takes in pair of values. Ex: $randomassign role1 1 role2 5. This creates 6 roles and assigns to the players of the current game. Note: The number of players should match the number of roles and there should be an active game. Also, 'role' here isn't the same as Discord roles. All the players must also allow private DMs from this server. This can be enabled in the server's private settings."
 };
